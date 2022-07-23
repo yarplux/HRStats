@@ -10,62 +10,82 @@ import requests
 import urllib.parse
 import re
 import bs4
-from bs4.element import Comment
+import pprint
 
 
-def tag_visible(element):
-    if element.parent.name in ['style', 'script', 'head', 'title', 'meta', '[document]']:
-        return False
-    if isinstance(element, Comment):
-        return False
-    return True
+# TODO оптимизация без регулярок
+# re.compile - заранее парсит регулярное выражение
+def get_words_from_page(body):
+    bs = bs4.BeautifulSoup(body, features="html5lib")
+    phrases = []
+    keywords = []
+
+    # TODO корректно выбирать не только слова из ключевых слов, но и словосочетания из текста
+    # получение английских слов / фраз из текста вакансии
+    # res = bs.find_all('div', attrs={"class": "g-user-content", "data-qa": "vacancy-description"})
+    # if res:
+    #     phrases = [i.text for i in res[0].children if i.text.strip() and re.match(".*[a-zA-Z]+.*", i.text)]
+
+    # получение английских слов из ключевых слов вакансии
+    res = bs.find_all('div', class_="bloko-tag-list")
+    if res:
+        # это list comprehensions - исчисление списков - создание списка - все храняться в памяти и доступны
+        # отличие от генератора - г-р не держит в памяти все генерируемые компоненты - пройтись по нему можно 1 раз
+        keywords = [i.text for i in res[0].children if re.match('.*[a-zA-Z]+.*', i.text)]
 
 
-def text_from_html(body):
-    soup = bs(body, 'html.parser')
-    texts = soup.findAll(text=True)
-    visible_texts = filter(tag_visible, texts)
-    return u" ".join(t.strip() for t in visible_texts)
+
+    print(
+        ('phrases ' + str(len(phrases)) + '; ' if phrases else '') +
+        ('keywords ' + str(len(keywords)) if keywords else '')
+    )
+    return phrases + keywords
+
+
+def get_headers(query: str):
+    referer = 'https://hh.ru/search/vacancy?from=suggest_post&fromSearchLine=true&area=113&customDomain=1&page=0&hhtmFrom=vacancy_search_list'
+    url = referer + '&text=' + urllib.parse.quote(query)
+
+    agent = 'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36'
+    return url, {'referer': url, 'user-agent': agent}
+
+
+def get_response_text(url: str, headers):
+    response = requests.get(url, headers=headers)
+    print(response.status_code, url)
+    return response
 
 
 def main():
     query = 'Java разработчик'
-    referer = 'https://hh.ru/search/vacancy?from=suggest_post&fromSearchLine=true&area=113&customDomain=1&page=0&hhtmFrom=vacancy_search_list'
-    agent = 'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36'
+    job_limit = 10
+    word_base = {}
 
-    url = referer + '&text=' + urllib.parse.quote(query)
-    headers = {
-        'referer': url,
-        'user-agent': agent
-    }
+    url, headers = get_headers(query)
+    jobs_response = get_response_text(url, headers)
+    for job in re.findall(r'(https:/.hh\.ru/vacancy/\d*)\?', jobs_response.text):
+        if not job_limit:
+            break
 
-    response = requests.get(url, headers=headers)
-    m = re.findall(r'(https:\/.hh\.ru\/vacancy\/\d*)\?', response.text)
-
-    for job in m:
+        job_limit -= 1
         try:
-            r = requests.get(job, headers=headers)
+            job_response = get_response_text(job, headers)
+            job_words = get_words_from_page(job_response.text)
 
-            print(r.status_code, job)
-            bs = bs4.BeautifulSoup(r.text, features="html5lib")
+            for word in job_words:
+                if word_base.get(word):
+                    word_base[word].append(job)
+                else:
+                    word_base[word] = [job]
 
-            res = bs.find_all('div', attrs={"class": "g-user-content", "data-qa": "vacancy-description"})
+            # todo запись в файл / чтение из файла распаршенного
+            # todo в несколько потоков
 
-            phrases = [i.text for i in res[0].children if i.text.strip() and re.match(".*[a-zA-Z]+.*", i.text)]
-
-            res = bs.find_all('div', class_="bloko-tag-list")
-            words = [i.text for i in res[0].children if re.match('.*[a-zA-Z]+.*', i.text)]
-
-            # отличие от генератора - генератор не держит в памяти все генерируемые компоненты - пройтись по нему можно 1 раз
-            # это list comprehensions - исчисление списков - создание списка - все храняться в памяти и доступны
-            # TODO оптимизация без регулярок
-            # re.compile - заранее парсит регулярное выражение
-
-            print(words)
-        except:
+        except (TypeError, NameError):
             print('Уникальная разметка: ', job)
 
-    pass
+    for word in word_base.keys():
+        print(word + ": " + str(len(word_base[word])))
 
 
 if __name__ == '__main__':
