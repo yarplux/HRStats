@@ -13,20 +13,21 @@ import urllib.parse
 import re
 import bs4
 import json
+import pickle
 
 import asyncio
 import httpx
 
 # TODO оптимизация без регулярок
 # re.compile - заранее парсит регулярное выражение
-from httpx import HTTPStatusError
-
+from constants import PATTERN
 from requests import HTTPError
 
 
-def get_words_from_page(body, pattern):
-    # html5lib
-    bs = bs4.BeautifulSoup(body, features="lxml")
+def get_words_from_page(body, pattern, method='html5lib'):
+    #
+    # lxml
+    bs = bs4.BeautifulSoup(body, features=method)
     phrases = []
     keywords = []
 
@@ -65,7 +66,7 @@ async def get_response_text(url: str, client, headers):
 
 
 def init_results():
-    path = 'results'
+    path = './results/page_1.json'
     if not os.path.exists(path):
         return {}
 
@@ -74,14 +75,14 @@ def init_results():
 
 
 def save_results(word_base):
-    path = 'results'
+    path = './results/page_1.json'
     with open(path, 'w') as file:
         json.dump(word_base, file)
 
 
 async def main():
     query = 'Java разработчик'
-    pattern = re.compile('.*[a-zA-Z]+.*')
+
     word_base = init_results()
 
     # [c.text for c in bs4.BeautifulSoup(jobs_response.text, features='html5lib').find('div', {'data-qa': 'pager-block'}).children][-2]
@@ -99,7 +100,7 @@ async def main():
         tasks = [asyncio.create_task(get_response_text(job, client, headers)) for job in jobs]
         responses = await asyncio.gather(*tasks)
 
-    for response in responses:
+    for i, response in enumerate(responses):
         if response is None:
             continue
 
@@ -107,7 +108,14 @@ async def main():
             job_response = response[1]
             job = response[0]
 
-            job_words = get_words_from_page(job_response.text, pattern)
+            with open('./tests/data/page_1_job' + str(i), 'w', encoding='UTF-8') as file:
+                file.write(job_response.text)
+
+            job_words = get_words_from_page(job_response.text, PATTERN)
+
+            with open('./tests/data/page_1_job' + str(i) + '_words', 'wb') as file:
+                pickle.dump(job_words, file)
+
 
             for word in job_words:
                 if word_base.get(word):
