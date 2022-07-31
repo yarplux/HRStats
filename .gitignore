@@ -3,4 +3,4 @@ venv
 *.key
 *.pub
 /results
-*.prof
+/prof
